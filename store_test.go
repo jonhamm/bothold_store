@@ -44,9 +44,9 @@ func NewTestDb() (*TestDb, error) {
 	return &TestDb{db, fileName}, nil
 }
 
-func (store *TestDb) Delete() {
-	store.db.Close()
-	os.Remove(store.fileName)
+func (db *TestDb) Delete() {
+	db.db.Close()
+	os.Remove(db.fileName)
 
 }
 
@@ -69,7 +69,7 @@ func testWithDb(t *testing.T, testFunc func(*testing.T, *TestDb)) {
 	testFunc(t, db)
 }
 
-func testWithStore(t *testing.T, testFunc func(*testing.T, *Store)) {
+func testWithStore(t *testing.T, testFunc func(*testing.T, *DB)) {
 	testWithDb(t, func(t *testing.T, db *TestDb) {
 		sessionStore := NewSessionStore(db.db, []byte("secret"))
 		testFunc(t, sessionStore)
@@ -105,9 +105,9 @@ func findSession(db *bh.Store, id string) *BotholdSession {
 	return s
 }
 
-func makeCountHandler(name string, store *Store) http.HandlerFunc {
+func makeCountHandler(name string, db *DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		session, err := store.Get(r, name)
+		session, err := db.Get(r, name)
 		if err != nil {
 			panic(err)
 		}
@@ -115,7 +115,7 @@ func makeCountHandler(name string, store *Store) http.HandlerFunc {
 		count, _ := session.Values["count"].(int)
 		count++
 		session.Values["count"] = count
-		if err := store.Save(r, w, session); err != nil {
+		if err := db.Save(r, w, session); err != nil {
 			panic(err)
 		}
 		// leak session ID so we can mess with it in the db
@@ -125,8 +125,8 @@ func makeCountHandler(name string, store *Store) http.HandlerFunc {
 }
 
 func TestBasic(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		countFn := makeCountHandler("session", store)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		countFn := makeCountHandler("session", db)
 		r1 := req(countFn, nil)
 		match(t, r1, 200, "1")
 		r2 := req(countFn, parseCookies(r1.Header().Get("Set-Cookie"))["session"])
@@ -135,33 +135,33 @@ func TestBasic(t *testing.T) {
 }
 
 func TestExpire(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		countFn := makeCountHandler("session", store)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		countFn := makeCountHandler("session", db)
 
 		r1 := req(countFn, nil)
 		match(t, r1, 200, "1")
 
 		// test still in db but expired
 		id := r1.Header().Get("X-Session")
-		s := findSession(store.db, id)
+		s := findSession(db.db, id)
 
 		s.ExpiresAt = time.Now().Add(-40 * 24 * time.Hour)
-		store.db.Update(s.ID, s)
+		db.db.Update(s.ID, s)
 
 		r2 := req(countFn, parseCookies(r1.Header().Get("Set-Cookie"))["session"])
 		match(t, r2, 200, "1")
 
-		store.Cleanup()
+		db.Cleanup()
 
-		if findSession(store.db, id) != nil {
+		if findSession(db.db, id) != nil {
 			t.Error("Expected session to be deleted")
 		}
 	})
 }
 
 func TestBrokenCookie(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		countFn := makeCountHandler("session", store)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		countFn := makeCountHandler("session", db)
 
 		r1 := req(countFn, nil)
 		match(t, r1, 200, "1")
@@ -174,20 +174,20 @@ func TestBrokenCookie(t *testing.T) {
 }
 
 func TestMaxAgeNegative(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		countFn := makeCountHandler("session", store)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		countFn := makeCountHandler("session", db)
 
 		r1 := req(countFn, nil)
 		match(t, r1, 200, "1")
 
 		r2 := req(func(w http.ResponseWriter, r *http.Request) {
-			session, err := store.Get(r, "session")
+			session, err := db.Get(r, "session")
 			if err != nil {
 				panic(err)
 			}
 
 			session.Options.MaxAge = -1
-			store.Save(r, w, session)
+			db.Save(r, w, session)
 
 			http.Error(w, "", http.StatusOK)
 		}, parseCookies(r1.Header().Get("Set-Cookie"))["session"])
@@ -199,24 +199,24 @@ func TestMaxAgeNegative(t *testing.T) {
 		}
 
 		id := r1.Header().Get("X-Session")
-		if s := findSession(store.db, id); s != nil {
+		if s := findSession(db.db, id); s != nil {
 			t.Error("Expected session to be deleted")
 		}
 	})
 }
 
 func TestMaxLength(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		store.MaxLength(10)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		db.MaxLength(10)
 
 		r1 := req(func(w http.ResponseWriter, r *http.Request) {
-			session, err := store.Get(r, "session")
+			session, err := db.Get(r, "session")
 			if err != nil {
 				panic(err)
 			}
 
 			session.Values["a"] = "aaaaaaaaaaaaaaaaaaaaaaaa"
-			if err := store.Save(r, w, session); err == nil {
+			if err := db.Save(r, w, session); err == nil {
 				t.Error("Expected too large error")
 			}
 
@@ -227,9 +227,9 @@ func TestMaxLength(t *testing.T) {
 }
 
 func TestMultiSessions(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		countFn1 := makeCountHandler("session1", store)
-		countFn2 := makeCountHandler("session2", store)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		countFn1 := makeCountHandler("session1", db)
+		countFn2 := makeCountHandler("session2", db)
 
 		r1 := req(countFn1, nil)
 		match(t, r1, 200, "1")
@@ -244,16 +244,16 @@ func TestMultiSessions(t *testing.T) {
 }
 
 func TestReuseSessionByName(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
+	testWithStore(t, func(t *testing.T, db *DB) {
 		sessionName := "test-session"
 
 		handler := func(w http.ResponseWriter, r *http.Request) {
-			session, err := store.New(r, sessionName)
+			session, err := db.New(r, sessionName)
 			if err != nil {
 				panic(err)
 			}
 			session.ID = ""
-			if err := store.Save(r, w, session); err != nil {
+			if err := db.Save(r, w, session); err != nil {
 				panic(err)
 			}
 			http.Error(w, "", http.StatusOK)
@@ -264,7 +264,7 @@ func TestReuseSessionByName(t *testing.T) {
 		r2 := req(handler, parseCookies(r1.Header().Get("Set-Cookie"))[sessionName])
 		match(t, r2, 200, "")
 
-		count, err := store.db.Count(&BotholdSession{}, nil)
+		count, err := db.db.Count(&BotholdSession{}, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -277,38 +277,38 @@ func TestReuseSessionByName(t *testing.T) {
 }
 
 func TestPeriodicCleanup(t *testing.T) {
-	testWithStore(t, func(t *testing.T, store *Store) {
-		store.SessionOpts.MaxAge = 1
-		countFn := makeCountHandler("session", store)
+	testWithStore(t, func(t *testing.T, db *DB) {
+		db.SessionOpts.MaxAge = 1
+		countFn := makeCountHandler("session", db)
 
 		quit := make(chan struct{})
-		go store.PeriodicCleanup(200*time.Millisecond, quit)
+		go db.PeriodicCleanup(200*time.Millisecond, quit)
 
 		// test that cleanup i done at least twice
 
 		r1 := req(countFn, nil)
 		id1 := r1.Header().Get("X-Session")
 
-		if findSession(store.db, id1) == nil {
+		if findSession(db.db, id1) == nil {
 			t.Error("Expected r1 session to exist")
 		}
 
 		time.Sleep(2 * time.Second)
 
-		if findSession(store.db, id1) != nil {
+		if findSession(db.db, id1) != nil {
 			t.Error("Expected r1 session to be deleted")
 		}
 
 		r2 := req(countFn, nil)
 		id2 := r2.Header().Get("X-Session")
 
-		if findSession(store.db, id2) == nil {
+		if findSession(db.db, id2) == nil {
 			t.Error("Expected r2 session to exist")
 		}
 
 		time.Sleep(2 * time.Second)
 
-		if findSession(store.db, id2) != nil {
+		if findSession(db.db, id2) != nil {
 			t.Error("Expected r2 session to be deleted")
 		}
 
@@ -319,13 +319,13 @@ func TestPeriodicCleanup(t *testing.T) {
 		r3 := req(countFn, nil)
 		id3 := r3.Header().Get("X-Session")
 
-		if findSession(store.db, id3) == nil {
+		if findSession(db.db, id3) == nil {
 			t.Error("Expected r3 session to exist")
 		}
 
 		time.Sleep(2 * time.Second)
 
-		if findSession(store.db, id3) == nil {
+		if findSession(db.db, id3) == nil {
 			t.Error("Expected r3 session to exist")
 		}
 	})

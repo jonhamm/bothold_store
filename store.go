@@ -5,7 +5,7 @@ Simplest form:
 
 	    import (
 			bh "github.com/timshannon/bolthold"
-		    bhs "github.com/timshannon/bolthold_store"
+		    bhs "github.com/jonhamm/bolthold_store"
 		)
 
 		func main() {
@@ -65,8 +65,8 @@ const sessionIDLen = 32
 const defaultMaxAge = 60 * 60 * 24 * 30 // 30 days
 const defaultPath = "/"
 
-// Store represent a bothold_store
-type Store struct {
+// DB represent a bothold_store
+type DB struct {
 	db          *bh.Store
 	Codecs      []securecookie.Codec
 	SessionOpts *sessions.Options
@@ -81,8 +81,8 @@ type BotholdSession struct {
 }
 
 // / NewSessionStore creates a new bothold_store session with options
-func NewSessionStore(db *bh.Store, keyPairs ...[]byte) *Store {
-	st := &Store{
+func NewSessionStore(db *bh.Store, keyPairs ...[]byte) *DB {
+	st := &DB{
 		db:     db,
 		Codecs: securecookie.CodecsFromPairs(keyPairs...),
 		SessionOpts: &sessions.Options{
@@ -98,12 +98,12 @@ func NewSessionStore(db *bh.Store, keyPairs ...[]byte) *Store {
 }
 
 // Get returns a session for the given name after adding it to the registry.
-func (st *Store) Get(r *http.Request, name string) (*sessions.Session, error) {
+func (st *DB) Get(r *http.Request, name string) (*sessions.Session, error) {
 	return sessions.GetRegistry(r).Get(st, name)
 }
 
 // New creates a session with name without adding it to the registry.
-func (st *Store) New(r *http.Request, name string) (*sessions.Session, error) {
+func (st *DB) New(r *http.Request, name string) (*sessions.Session, error) {
 	session := sessions.NewSession(st, name)
 	opts := *st.SessionOpts
 	session.Options = &opts
@@ -125,7 +125,7 @@ func (st *Store) New(r *http.Request, name string) (*sessions.Session, error) {
 }
 
 // Save session and set cookie header
-func (st *Store) Save(r *http.Request, w http.ResponseWriter, session *sessions.Session) error {
+func (st *DB) Save(r *http.Request, w http.ResponseWriter, session *sessions.Session) error {
 	s := st.getSessionFromCookie(r, session.Name())
 
 	// delete if max age is < 0
@@ -181,7 +181,7 @@ func (st *Store) Save(r *http.Request, w http.ResponseWriter, session *sessions.
 }
 
 // getSessionFromCookie looks for an existing BotholdSession from a session ID stored inside a cookie
-func (st *Store) getSessionFromCookie(r *http.Request, name string) *BotholdSession {
+func (st *DB) getSessionFromCookie(r *http.Request, name string) *BotholdSession {
 	if cookie, err := r.Cookie(name); err == nil {
 		sessionID := ""
 		if err := securecookie.DecodeMulti(name, cookie.Value, &sessionID, st.Codecs...); err != nil {
@@ -200,7 +200,7 @@ func (st *Store) getSessionFromCookie(r *http.Request, name string) *BotholdSess
 // MaxAge sets the maximum age for the store and the underlying cookie
 // implementation. Individual sessions can be deleted by setting
 // Options.MaxAge = -1 for that session.
-func (st *Store) MaxAge(age int) {
+func (st *DB) MaxAge(age int) {
 	st.SessionOpts.MaxAge = age
 	for _, codec := range st.Codecs {
 		if sc, ok := codec.(*securecookie.SecureCookie); ok {
@@ -212,7 +212,7 @@ func (st *Store) MaxAge(age int) {
 // MaxLength restricts the maximum length of new sessions to l.
 // If l is 0 there is no limit to the size of a session, use with caution.
 // The default is 4096 (default for securecookie)
-func (st *Store) MaxLength(l int) {
+func (st *DB) MaxLength(l int) {
 	for _, c := range st.Codecs {
 		if codec, ok := c.(*securecookie.SecureCookie); ok {
 			codec.MaxLength(l)
@@ -221,12 +221,12 @@ func (st *Store) MaxLength(l int) {
 }
 
 // Cleanup deletes expired sessions
-func (st *Store) Cleanup() {
+func (st *DB) Cleanup() {
 	st.db.DeleteMatching(&BotholdSession{}, bh.Where("ExpiresAt").Le(time.Now()))
 }
 
 // PeriodicCleanup runs Cleanup every interval. Close quit channel to stop.
-func (st *Store) PeriodicCleanup(interval time.Duration, quit <-chan struct{}) {
+func (st *DB) PeriodicCleanup(interval time.Duration, quit <-chan struct{}) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
