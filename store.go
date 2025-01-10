@@ -105,8 +105,7 @@ func (st *DB) Get(r *http.Request, name string) (*sessions.Session, error) {
 // New creates a session with name without adding it to the registry.
 func (st *DB) New(r *http.Request, name string) (*sessions.Session, error) {
 	session := sessions.NewSession(st, name)
-	opts := *st.SessionOpts
-	session.Options = &opts
+	session.Options = st.SessionOpts
 	session.IsNew = true
 
 	st.MaxAge(st.SessionOpts.MaxAge)

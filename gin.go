@@ -13,6 +13,8 @@ type Store interface {
 
 func NewStore(db *bh.Store, expiredSessionCleanup bool, keyPairs ...[]byte) Store {
 	sessionStore := NewSessionStore(db, keyPairs...)
+	sessionStore.SessionOpts.HttpOnly = true
+	sessionStore.SessionOpts.Secure = true
 	if expiredSessionCleanup {
 		quit := make(chan struct{})
 		go sessionStore.PeriodicCleanup(1*time.Hour, quit)
