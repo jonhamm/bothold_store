@@ -10,6 +10,7 @@ import (
 
 type Store interface {
 	sessions.Store
+	SessionOptions() *sessions.Options
 }
 
 func NewStore(db *bh.Store, expiredSessionCleanup bool, keyPairs ...[]byte) Store {
