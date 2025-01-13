@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-contrib/sessions"
+	gs "github.com/gorilla/sessions"
 	bh "github.com/timshannon/bolthold"
 )
 
@@ -13,8 +14,6 @@ type Store interface {
 
 func NewStore(db *bh.Store, expiredSessionCleanup bool, keyPairs ...[]byte) Store {
 	sessionStore := NewSessionStore(db, keyPairs...)
-	sessionStore.SessionOpts.HttpOnly = true
-	sessionStore.SessionOpts.Secure = true
 	if expiredSessionCleanup {
 		quit := make(chan struct{})
 		go sessionStore.PeriodicCleanup(1*time.Hour, quit)
@@ -28,4 +27,19 @@ type store struct {
 
 func (s *store) Options(options sessions.Options) {
 	s.DB.SessionOpts = options.ToGorillaOptions()
+}
+
+func (s *store) SessionOptions() *sessions.Options {
+	return fromGorillaOptions(s.DB.SessionOpts)
+}
+
+func fromGorillaOptions(options *gs.Options) *sessions.Options {
+	return &sessions.Options{
+		Path:     options.Path,
+		Domain:   options.Domain,
+		MaxAge:   options.MaxAge,
+		Secure:   options.Secure,
+		HttpOnly: options.HttpOnly,
+		SameSite: options.SameSite,
+	}
 }
